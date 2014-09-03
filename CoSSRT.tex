@@ -82,14 +82,13 @@
 \begin{textblock*}{0mm}(-12.2mm,-0.3mm)\noindent \includegraphics*{./gfx/bg.png}\end{textblock*}
 \begin{textblock*}{0mm}(144.3mm,238.3mm)\noindent \includegraphics*{./gfx/openlab.png}\end{textblock*}
 \begin{textblock*}{150mm}(114.2mm,140.0mm)\noindent
-{\bfseries\sffamily\textbf{\fontsize{20}{20}\selectfont\color{natc}Full Title of the Report}}\\[36pt]
+{\bfseries\sffamily\textbf{\fontsize{20}{20}\selectfont\color{natc}Oracle TimesTen in-memory\newline database integration}}\\[36pt]
 {\bfseries\sffamily\textbf{\fontsize{16}{20}\selectfont\color{natc}\motd\today}}\\[18pt]
 {\sffamily\fontsize{14}{20}\selectfont\color{subc}Author:}\\
-{\sffamily\fontsize{14}{20}\selectfont\color{subc}First Name Family Name of the Author}\\[18pt]
-{\sffamily\fontsize{14}{20}\selectfont\color{subc}Supervisor(s):}\\
-{\sffamily\fontsize{14}{20}\selectfont\color{subc}First Name Family Name}\\
-{\sffamily\fontsize{14}{20}\selectfont\color{subc}First Name Family Name}\\
-{\sffamily\fontsize{14}{20}\selectfont\color{subc}Etc.}\\[18pt]
+{\sffamily\fontsize{14}{20}\selectfont\color{subc}Jakub Žitný}\\[18pt]
+{\sffamily\fontsize{14}{20}\selectfont\color{subc}Supervisor:}\\
+{\sffamily\fontsize{14}{20}\selectfont\color{subc}Miroslav Potocký}\\
+{\sffamily\fontsize{14}{20}\selectfont\color{subc}}\\[18pt]
 \textbf{\bfseries\sffamily\fontsize{11}{20}\selectfont\color{subc}CERN openlab Summer Student Report 2014}
 
 \end{textblock*}
@@ -97,12 +96,11 @@
 \thispagestyle{empty}\newpage
 
 \section*{Project Specification}
-\lipsum[1]
+The objective is to build an rpm/script/puppet module that will easily deploy TimesTen in-memory database on existing server/cluster. Create script configuring TimesTen in-memory database for usage with specific database/RAC and creating step-by-step document (Twiki+Snow KB) on how to get required data cached in a simple way. Ultimate outcome will be to have a new service to deploy TT caching easily on any puppetized DB server.
 \newpage
 
 \section*{Abstract}
-\lipsum[1]%
-\let\thefootnote\relax\footnote{\noindent Powered by \LaTeX. K.\ B.\ Sokol.}
+TimesTen is in-memory database from Oracle with ability to be attached as a cache to existing Oracle Database. The installation process of TimesTen requires a lot of configuration to be done and although Oracle provides some installation scripts to simplify that, one still needs to go through a lot of steps to set everything up. This work explores the TimesTen configuration options, proposes the solution for automating as much of the setup as possible and presents the easiest ways to build a working in-memory cache layer for Oracle.
 \newpage
 
 {\fontsize{11}{13}\sffamily\linespread{1.750}\selectfont\tableofcontents}
@@ -115,22 +113,292 @@
 \fancyfoot[LE,LO]{\footerfont\fontsize{9}{11}\selectfont \textcolor{footerc}{\textbf{\thepage~$|$}}~\textcolor{footerc1}{\footerfont\so{\texttt{Page}}}} % \fontfamily{ppl}\selectfont
 
 \section{Introduction}
-\lipsum[1-5]
-\section{Introduction1}
-\lipsum[1-5]
-\section{Introduction2}
-\lipsum[1-5]
-\subsection{lo1}
-\lipsum[1-4]
-\subsubsection{lo2}
-\lipsum[1-2]~\citep{articleExample}
-\lipsum[3]
+One of the tools that manages most of the data at CERN is Oracle Database. The IT-DB group at CERN works on various improvements for Oracle Database and one of the performance ones is using TimesTen in-memory database as a caching layer.
 
-% \begin{center} \noindent \line(1,0){250} \end{center}	  % Optional ending line
+TimesTen itself is standalone database product from Oracle. It is an in-memory relational SQL database that can be used as regular database for applications, can be backed up and can be replicated. The main advantages of TimesTen are simplicity and speed. Oracle claims the simple design of TimesTen is due to the fact that all data resides in memory which leads to the promised speed up, even more significant than fully-cached Oracla Database. This shows to the most interesting use-case of TimesTen that is TimesTen as a caching layer for Oracle Database. In this case, TimesTen instance is deployed on separate server (or servers) and application communicates only with TimesTen. When TimesTen is deployed on the same machine as application server, significant network latency is lost for even faster application – database communication. TimesTen caching layer can be read-only and writethrough.
+
+Although TimesTen is supposed to be simple and easy to use, the installation and configuration resembles more the complex setup of Oracle Database than just MySQL, MongoDB or Redis. TODO This work dives into the configuration options of TimesTen and proposes a solution for automating TimesTen integration for CERN environment as well as generic setup for Red-Hat Linux derived distributions.
+
+TODO cache setup user/awt/… configs, replications and future proposals..
+
+TODO structure of chapters
+
+\section{TimesTen features and architecture}
+TODO arch, features, Server/client ..
+
+\section{TimesTen installation procedure}
+TimesTen installation requires several prerequisities to be met. System administrator has to set up kernel parameters to customize shared memory, semaphore and hugepage behaviour, manually create directory for TimesTen instance information and also create system user and group for administration of TimesTen instance. After preparing these, system administrator can use bundled installation script from Oracle to install TimesTen. This installation script can be executed in interactive or batch mode and requires answers for several questions. When installation script finishes, TimesTen daemon is launched. Before customizing the instance or setting up caching it is encouraged to set environment variables for TimesTen instance administrating user.
+\subsection{Pre-install procedures}
+Considering the instance needs, system administrator might need to set up 4 kernel parameters – SHMMAX, SHMALL, SEM and NR_HUGEPAGES. [ref_shmvars]
+
+SHMMAX and SHMALL are related to shared memory. SHMMAX is the maximum size of a single shared memory segment in bytes and should be calculated by estimating the following:
+
+                PermSize + TempSize + LogBufMB + 64 MB
+
+These are TimesTen connection attributes that set the sizes of the TimesTen permanent memory partition, temporary memory partition, and log buffer. The sum of these when using default values is 136 MB plus 64 MB allowance for overhead [ref_shmmax, ref_shmmaxvals]. However, this might need to be recalculated if PermSize or LogBufMB is changed.
+
+SHMALL is system-wide total size of shared memory segments in pages and the value is similar to the same value on system for Oracle database. It should be lower than the physical memory on the system. Usually there should be enough space for OS memory operations, e.g. 1 GB for Linux, and the rest can be dedicated to SHMALL for TimesTen. [ref_shm]
+
+SEM parameter specifies kernel semaphore settings. SEM itself is made of four values. The first value is SEMMSL, the maximum number of semaphore per array. The second one, SEMMNS, is the maximum number of semaphores system-wide. The third value, SEMOPM, is the maximum number of operations per semop call, and the last one is the maximum number of arrays [ref_simon]. TimesTen itself uses 155 semaphores, plus one for each connection [ref_semaphore] so SEMMSL has to reflect this. SEMMNS might satisfy the product of SEMMSL and SEMMNI although it is not necessary [ref_simon].
+
+NR_HUGEPAGES is the number of huge pages for the system. This value depends on hugepage size and of course on the size of physical memory available on the system. We showed how to calculate the total size of shared memory segments. In order to use huge pages for all shared memory, the number of hugepages should be the SHMALL divided by the size of huge pages which is usually 2 MB by default. To use huge pages for the whole system simply divide the size of physical memory by huge page size.
+
+All of the custom kernel parameter values are on Red Hat distributions to be entered into ‘/etc/sysctl.conf’ and applied with command “sysctl –p”.
+
+After preparing the kernel, the system needs user account and group for TimesTen administration. This user has to be the owner of newly created directory ‘/etc/TimesTen/’ and he has to have all permissions on it. The installation script will use this to store information about the TimesTen instances, as there may be more than one of them on one system.
+
+TODO why hugepages, how?
+
+\subsubsection{Main installation}
+
+Inside the TimesTen installation package from Oracle, there is bundled installation script that installs all the scripts, configuration files and other files on the system. The script offers interactive and batch installation mode and is optimized for several operating systems. Besides Linux, it is Solaris, HP-UX and AIX. Figure below shows all possible options for the installation script.
+
+[fig]
+
+During interactive installation, user needs to address options to customize installation. Among them he needs to choose the instance name for TimesTen instance, the location of TimesTen files, daemon files, log files and data files, the port where TimesTen will listen for incoming connections, whether he wants to install documentation and Quick Start Sample Programs, whether he wants to set up Oracle Clusterware, whether he wants to enable PL/SQL for TimesTen and several others. For automated batch installation, he needs to record this configuration to answer file. An example for answer file is shown on [fig2]. The installation script is also able to record these answers interactively. The complete list of options is available in TODO REF
+
+[fig2]
+
+TODO usage
+
+Under the hood, script setup.sh is just wrapper around perl script install.pl that executes most of the installation. Script setup.sh is under 200 lines of code long, it checks if it’s executed on supported OS and passes all arguments to install.pl if so. There is also an option to uninstall TimesTen from the system. Uninstall procedure is further described in section 3.4.
+
+The main installator – install.pl is script almost 7000 LOC long written in Perl, supporting multiple shells and multiple operating systems. TODO what where
+
+TODO internals (list everthing the script does?)
+
+\subsubsection{Post-install procedures}
+
+After the main installation finishes, it is required to set up environment for TimesTen administrating user. Besides making sure that environment for Oracle connections and paths for binaries and dynamic libraries is properly set, TimesTen-specific variables should be added by sourcing script ‘ttenv.sh’ that is part of the installed scripts and binaries in bin directory. Script ‘ttenv.sh’ is a wrapper for perl script ‘envcfg’ that prepares and exports all needed variables. All tools for administering TimesTen, ttisql command-line interface and possible connections to external Oracle databases should be available.
+
+\subsubsection{Post-install procedures}
+
+TimesTen has to be paired with Oracle database in order to set up the caching-layer. Cache users, groups and permissions  and additional cache settings must be set up properly inside both databases.
+
+Firstly, the character set for TimesTen instance should be the same as in Oracle database. The character set of Oracle database can be checked by running the following SQL query:
+
+                select VALUE from NLS_DATABASE_PARAMETERS where PARAMETER='NLS_CHARACTERSET';
+
+To set it up for TimesTen instance, the DatabaseCharacterSet setting in info/sys.odbc.ini has to be edited.
+
+There should be cache manager and posibly cache data user inside the TimesTen instance. Let’s say we’ll create a cache manager user ‘cacheadm’ and cache data user ‘cachedata’. We want to grant ‘admin’ permissions to ‘cacheadm’ and ‘create session’ permissions to ‘cachedata’. This is done from the ‘ttisql’ utility connected to TimesTen instance.
+
+create user cacheadm identified by ek$3mELY.har0-Pw0; 
+grant admin to cacheadm;
+create user cachedata identified by 3v3N.har03r-Pw0; 
+grant create session to cachedata;
+
+Oracle database has to have the same users as these with appropriate grants as well as properly configured global cache schema. Instructions for this are listed in Appendix C.
+
+To move further a new connection as ‘cacheadm’ to TimesTen instance has to be made using ttisql. This time the connection will be connected also remotely to Oracle database. The TNS alias of specific Oracle database is to be entered into info/sys.odbc.ini as OracleNetServiceName. For this to work, ORACLE_HOME has to be set and properly point to the directory with tnsnames.ora file. Following command is used for the connection:
+
+                connect "dsn=cachedb1_1122;uid=cacheadm;oraclepwd=cacheadm";
+
+The ‘dsn’ argument specifies local TimesTen instance DSN, the ‘uid’ is the name of cache administration user that is the same on TimesTen and Oracle database, ‘pwd’ is the TimesTen cache administration user’s password and the ‘oraclepwd’ is the Oracle database’s paired cache administration user’s password.
+
+To actually pair these users, the following command should be entered TODO REALLY:
+
+                call ttcacheuidpwdset ('cacheadm','cacheadm');
+
+A TimesTen cache grid provides users with Oracle databases a means to horizontally scale out cache groups across multiple systems with read and write data consistency across the TimesTen databases and predictable latency for database transactions. A cache grid contains one or more grid members that collectively manage application data using the relational data model [ref_ttgrid]. At least one cache grid has to be present and associated with the TimesTen instance. For newly created TimesTen instance, following commands do the job:
+
+                call ttgridcreate ('samplegrid');
+       call ttgridnameset ('samplegrid');
+
+TODO cachegroups…, more sysodbcini examples
+
+\subsection{Uninstall}
+
+The default uninstall procedure is even more intertwined than installation. The installation package contains a script called ‘uninst.sh’, it’s almost 1300 lines of Bash code long, but after executing it, it says only the following:
+
+$ ./uninst.sh
+To uninstall TimesTen, run setup.sh with -uninstall option.
+
+However, running setup.sh with uninstall option requests running it from the location where all the binaries for installed instance are located.
+
+$ ./setup.sh –uninstall
+To uninstall a specific instance of TimesTen, run the setup.sh script located
+within the installation directory that you wish to uninstall.
+For example :
+/opt/TimesTen/giraffe/bin/setup.sh –uninstall
+... will uninstall the instance 'giraffe', located in '/opt/TimesTen/giraffe'.
+
+NOTE: Prior to performing an uninstallation, make sure that your working
+             directory is not within the path of the instance you wish to remove.
+
+ 
+
+Finally, after executing the same script located inside the bin directory in TimesTen instance location, the procedure seems to work. However, the same ‘uninst.sh’ as the one from installation package is located nearby, in the bin directory, too. Inspecting the working ‘setup.sh’ with uninstall option showed that it is this one that does the actual uninstallation.
+
+\section{TimesTen caching layer setup /Application-Tier cache/}
+
+Caching capabilities
+
+                Ro, rw
+
+Cache groups
+
+Cache Advisor and data “guide”
+
+Simple caching examples
+
+Complex caching options
+
+\section{Automated installation}
+
+The bottom line of previous chapters was to show the complexity of TimesTen installation. Anyone interested in fast tryout of this database might be repelled by that. Moreover, setting up a cache layer for Oracle database requires some knowledge of proper caching techniques. These have been introduced in chapter 4.
+
+This work brings a several simplifications to the installation process of TimesTen. First of all, it presents a wrapper script for installing TimesTen with all dependencies, system-level settings and configuration. The script is called ‘ttdeploy’ and can be use interactively or in batch mode to deploy TimesTen for testing purposes faster. For even more convenient installation, we packed the script and original installation archive into RPM package.
+
+At CERN, the automated deployment of services is crucial for running the organisation and operation of experiments.  This work therefore proposes a complete integration of TimesTen into CERN’s Puppet/LDAP environment.
+
+\subsection{Wrapper ‘ttdeploy’}
+
+The default TimesTen installation script, as described in chapter 3, handles … TODO This work presents a wrapper ‘ttdeploy’ to address also pre-install and post-install tasks as well as TimesTen caching setup and uninstallation.
+
+Program ‘ttdeploy’ prepares the whole system for TimesTen deployment, including the setup of kernel parameters, user and group account, permissions, TimesTen installation, environment variables and also desired configuration of TimesTen caching. It is written in Bash and optimized for Linux distributions derived from Red-Hat.
+
+TODO The TimesTen installation archive, however, still has to be downloaded from Oracle website manually.
+
+\subsubsection{Usage}
+
+As [fig2] shows, ttdeploy can be run in interactive mode, automated batch mode or in uninstall mode. Each of them offers logging, verbose output and also debugging for future enhancements or possible problems.
+
+[fig2]
+
+Interactive mode is launched by following command, where tt.package is the official TimesTen package from Oracle. The package can be gzipped tar archive as downloaded from Oracle website (.tgz or .tar.gz), decompressed archive (.tar) or unpacked directory (linux8664 or  other name).
+
+                ttdeploy –i tt.package
+
+Batch mode needs additional argument specifying path to configuration file.
+
+                ttdeploy –i tt.package –b batch.conf
+
+The configuration file is text file with Bash variables. There are mandatory parameters that have to be present in the file and also several additional parameters that are optional. All of these options as well as examples of full config files are described in Appendix A. TODO attached configs
+
+Uninstallation requires the path to TimesTen home directory. The reasons for this are described in chapter 3.5. So, if TimesTen has been installed to ‘/home/ttadmin/’ then it should be uninstalled as follows:
+
+                ttdeploy –u /home/ttadmin/
+
+Verbose execution is supported in all modes with option ‘-v’. Debug execution is supported with ‘-d’. Debug passes the ‘–x’ parameter to Bash script. During debug execution all external programs, subshells, functions and commands are displayed to the user [ref_bashman].
+
+Exit codes of ‘ttdeploy’ are provided too, they are described in Appendix A.
+
+TODO Manpages, Cache setup
+
+\subsubsection{Supported plaftorms}
+
+Program ‘ttdeploy’ is optimized for Linux distributions derived from Red-Hat, that is Red-Hat Enterprise Linux, CentOS, Scientific Linux, Oracle Linux and others. These operating systems are most used at CERN. Support for other popular operating systems used for Oracle Database, such as Solaris, might be added in the future. Also support for systems that might be suitable for particular application server use-cases should be added. These systems might be preffered for the case where TimesTen and application server are on the same machine.
+
+Program ‘ttdeploy’ is a Bash script, currently without support for other popular shells like zsh, tcsh or ksh.
+
+\subsubsection{Internals}
+
+As mentioned earlier, program ‘ttdeploy’ is written as Bash script. It uses Bash functions for structured execution, effectiveness and better code readability. The script checks system configuration and tries to find all possible problems before executing anything. There are trap procedures that ensure proper cleanup in case of unexpected termination or termination signals.
+
+During the development, the use of external programs was eliminated in as many cases as possible. Inside the functions the script uses local variables so the environment is not full of temporary or unneccessary items. It prints necessary information in color about execution to stdout and error messages to stderr.
+
+The code is commented and all needed details are provided in man pages.
+
+TODO Which has type
+
+\subsubsection{Development}
+
+Ttdeploy together with documentation, example configuration files and rpmbuild scripts are versioned with Git and stored on CERN GIT central service.  The code, history and changes can be viewed Gitweb web interface at https://git.cern.ch/web/ttdeploy.git. TODO fuck gitweb
+
+There is a lot of issues that might need to be resolved in the code of ttdeploy and other scripts, future developers are welcome to address them.
+
+TODO TODOs, repo clones…
+
+After making changes to manpage file ttdeploy.1 it may be checked with following command.
+
+                groff -Tascii -man ttdeploy.1 | less
+
+\subsection{RPM package}
+To simplify the installation even more, we packed the ttdeploy program with configuration files and TimesTen installation archive into RPM package. RPM is a package manager for Linux distributions derived from Red-Hat. RPM packages are easily installed by simple command (below) and the package manager keeps track of everything, allowing easier uninstallation procedure, dependency management and other things.
+
+                rpm –i  package.rpm
+
+The RPM packages are compiled with specific configuration files. Three of them are already prepared for the most common use-cases. These are distributed only for CERN internal purposes, as the license agreement for TimesTen does not allow to redistribute it.
+
+There are some use-cases that should be addressed with different configuration files if needed. Updated RPMs may be easily created using a script that is part of the ttdeploy Git repository. After changing man pages, ttdeploy script or a configuration file, RPM can be rebuilt using following command:
+
+                ./buildrpm.sh TODO
+
+\subsection{Puppet}
+
+At CERN, the database servers for development and production purposes are managed by Puppet. Puppet is automation software that defines and enforces the state of server infrastructure, simplifying configuration, provisioning, orchestration and monitoring [pupref]. Database instances at CERN are installed from RPM packages and customized from LDAP .
+
+The Puppet environment is specified in modules, hostgroups and parameters in Hiera TODO REF. Puppet deals with OS-level configuration. Complex services, for example Oracle databases, are then installed from RPM packages and later customized with scripts and parameters from LDAP service for specific purpose. This way, all the different instances of Oracle Database have the same base on every system.
+
+TODO more puppet, more on why rpms
+
+Integrating TimesTen into Puppet environment for wider adoption at CERN has not been decided yet, but when the time comes, we propose using similar deployment structure as the one used for Oracle. There are OS-level prerequisities to be specified. These will be written into Puppet manifests. The stripped-down ‘vanilla’ RPM will be provided for preparing the instance of TimesTen. Post-install procedures and further customization will be done from LDAP or manually by the database administrator.
+
+The manifest file will have to include the TimesTen adminitrating user ‘timesten’, his password, shell, home directory and group with the same name. The existing RPM from previous chapter will have to be stripped down of pre and post-install procedures, will have to be made upgradable and will have to uploaded to TODO where. The database instance DSNs, cache-settings, replication and possible load balancing setting will have to be placed to LDAP service. Other service-level customizations, for example database users and permissions, are to be dealt with by assigned database administrator.
+
+\subsection{Other means of automation}
+
+In other complex environments, that might use another popular automation tool, such as Ansible, Salt or Chef TODO REF, the integration may look similar. This depends, however, on the specific organization-specific design of orchestration TODO MDFK.
+
+
+\section{Conclusion}
+
+This work prepared a foundation for further research on integration of TimesTen into database infrastructure at CERN. It was preceded by the work of Endre Andras Simon that focused on comparing the performance of Oracle Database with and without TimesTen caching. The comparison clearly showed that having TimesTen cache layer for high-load Oracle applications is promising. However, there is need for more complex benchmarks comparing fully-cached Oracle Database with TimesTen cache layer in various use-cases that are present at CERN.
+
+TODO egroups example
+
+Thanks to the tools this work has brought, the installation and cache layer setup is dramatically simplified. Therefore, any further research can focus solely on benchmarks and testing.
+
+Besides simplifying the installation for testing, created installation packages can be used for integrating TimesTen caching into production infrastructure at CERN, if members of database group decide. Additional details for plugging this service in CERN Puppet environment and LDAP has been provided.
+
+TODO
+
+\section{Appendices}
+References
+
+Glossary
+
+Oracle – Oracle Corporation (company)
+Oracle Database – Oracle RDBMS (software product)
+TimesTen – Oracle TimesTen in-memory database (software product)
+TimesTen instance – deployed TimesTen
+TimesTen caching – using TimesTen as cache layer for Oracle database
+TNS alias – the TNS protocol alias representing the hostname, port, … of remote Oracle database, sometimes referred to as Oracle Net Service Name (NSN).
+
+Appendix A – ttdeploy installation and usage
+
+Params
+
+Exitcodes
+
+configs
+
+Appendix B – traditional TimesTen installation scripts
+
+                Contents
+
+                Scripts
+
+                Procedure ad absurdum
+
+                Script stats
+
+Appendix C – oracle side cmds
+
+Appendix D – cache groups config
+
+Appendix E – TT example at CERN
+
+Appendix F - resurces
+
+%asd\citep{articleExample}
+
+%\begin{center} \noindent \line(1,0){250} \end{center}	  % Optional ending line
 
 
 %% Start References (a.k.a. bibliography)
-% \newpage								 % Optional new page before Bibliography
+\newpage
 \bibliography{bibliography.bib}{}
 \bibliographystyle{plainnat}
 

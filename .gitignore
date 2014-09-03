@@ -94,3 +94,7 @@ sympy-plots-for-*.tex/
 *.pptx
 presentation_image
 presentation_image/*
+
+
+.DS_Store
+*LatexianTemp*
